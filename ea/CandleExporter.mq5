@@ -31,19 +31,25 @@ void GetSymbols(string &symbols[])
    {
       // Use custom symbol list
       StringSplit(CustomSymbols, ',', symbols);
-      for(int i = 0; i < ArraySize(symbols); i++)
-         StringTrimRight(StringTrimLeft(symbols[i]));
+      for(int j = 0; j < ArraySize(symbols); j++)
+      {
+         StringTrimLeft(symbols[j]);
+         StringTrimRight(symbols[j]);
+      }
       return;
    }
 
-   // Default symbols — covers forex majors, crosses, gold, indices
+   // OANDA uses .sml suffix for some symbols, standard names for others
+   // Confirmed mapping from SymbolScanner:
+   //   EURUSD.sml, GBPUSD.sml, USDJPY.sml, AUDUSD.sml, GBPJPY.sml, XAUUSD.sml
+   //   USDCHF, USDCAD, NZDUSD, EURJPY, US30 (no suffix)
    string defaults[] = {
-      "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "USDCAD",
-      "AUDUSD", "NZDUSD", "EURJPY", "GBPJPY", "XAUUSD", "US30"
+      "EURUSD.sml", "GBPUSD.sml", "USDJPY.sml", "USDCHF", "USDCAD",
+      "AUDUSD.sml", "NZDUSD", "EURJPY", "GBPJPY.sml", "XAUUSD.sml", "US30"
    };
    ArrayResize(symbols, ArraySize(defaults));
-   for(int i = 0; i < ArraySize(defaults); i++)
-      symbols[i] = defaults[i];
+   for(int k = 0; k < ArraySize(defaults); k++)
+      symbols[k] = defaults[k];
 }
 
 //+------------------------------------------------------------------+
@@ -124,7 +130,12 @@ void ExportAllCandles()
 
          if(copied > 0)
          {
-            string fname = symbol + "_" + p_names[p] + ".json";
+            // Strip broker suffixes (.sml, .tml, etc.) for canonical filename
+            string clean_symbol = symbol;
+            int dot_pos = StringFind(clean_symbol, ".");
+            if(dot_pos > 0)
+               clean_symbol = StringSubstr(clean_symbol, 0, dot_pos);
+            string fname = clean_symbol + "_" + p_names[p] + ".json";
             int h = FileOpen(fname, FILE_WRITE | FILE_TXT | FILE_ANSI);
             if(h != INVALID_HANDLE)
             {
