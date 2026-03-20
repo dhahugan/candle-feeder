@@ -4,6 +4,8 @@ services:
     image: gmag11/metatrader5_vnc
     container_name: mt5-oanda
     restart: always
+    cpus: "1.0"
+    mem_limit: 768m
     volumes:
       - mt5_oanda_config:/config
     ports:
@@ -12,6 +14,8 @@ services:
     environment:
       - CUSTOM_USER=${MT5_VNC_USER:-admin}
       - PASSWORD=${MT5_VNC_PASSWORD:-100%Secured}
+      # Reduce MT5 resource usage — data only, no charts needed
+      - MT5_CMD_OPTIONS=/skipupdate /portable
     networks:
       - candle-net
 

@@ -108,9 +108,9 @@ void ExportAllCandles()
    GetSymbols(symbols);
 
    ENUM_TIMEFRAMES periods[] = {
-      PERIOD_M5, PERIOD_M15, PERIOD_H1, PERIOD_H4, PERIOD_D1
+      PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_H1, PERIOD_H4, PERIOD_D1
    };
-   string p_names[] = {"M5", "M15", "H1", "H4", "D1"};
+   string p_names[] = {"M1", "M5", "M15", "H1", "H4", "D1"};
 
    int exported = 0;
    int failed = 0;

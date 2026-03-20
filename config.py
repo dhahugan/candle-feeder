@@ -46,7 +46,7 @@ SYMBOLS = [
 ]
 
 # Timeframes
-TIMEFRAME_NAMES = ["M5", "M15", "H1", "H4", "D1"]
+TIMEFRAME_NAMES = ["M1", "M5", "M15", "H1", "H4", "D1"]
 
 # TwelveData symbol mapping
 TD_SYMBOL_MAP = {
@@ -57,5 +57,5 @@ TD_SYMBOL_MAP = {
 
 # TwelveData timeframe mapping
 TD_TF_MAP = {
-    "M5": "5min", "M15": "15min", "H1": "1h", "H4": "4h", "D1": "1day",
+    "M1": "1min", "M5": "5min", "M15": "15min", "H1": "1h", "H4": "4h", "D1": "1day",
 }
