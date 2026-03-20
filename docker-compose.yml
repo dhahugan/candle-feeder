@@ -16,6 +16,8 @@ services:
       - TWELVEDATA_KEYS=${TWELVEDATA_KEYS:-}
       # Redis for new-bar pub/sub (optional)
       - REDIS_URL=redis://candle-redis:6379
+      # SigNoz OTel Collector
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz-otel-collector:4318
       # Cache config
       - CACHE_DIR=/data/cache/mt5_cache
       - MAX_CANDLES=${MAX_CANDLES:-50000}
@@ -26,6 +28,7 @@ services:
       - candle-redis
     networks:
       - candle-net
+      - signoz-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -48,3 +51,6 @@ volumes:
 networks:
   candle-net:
     driver: bridge
+  signoz-net:
+    external: true
+    name: signoz-net

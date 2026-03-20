@@ -40,6 +40,14 @@ logging.basicConfig(
 )
 log = logging.getLogger("candle-feeder")
 
+# OTel: send logs + metrics to SigNoz (AFTER basicConfig so console handler exists)
+from telemetry import setup_telemetry, init_metrics, record_new_bar, record_poll_duration, update_cache_depths
+try:
+    setup_telemetry()
+    log.info("OTel telemetry initialized — sending to SigNoz")
+except Exception as _e:
+    log.warning(f"OTel init failed (non-fatal): {_e}")
+
 # --- Redis (optional) ---
 _redis = None
 
@@ -147,7 +155,13 @@ def main():
     # 6. Redis (optional)
     redis_connect()
 
-    # 7. Polling loop
+    # 7. Init OTel metrics (after setup_telemetry, before loop)
+    try:
+        init_metrics()
+    except Exception as e:
+        log.warning(f"OTel metrics init warning: {e}")
+
+    # 8. Polling loop
     log.info(f"Entering polling loop: interval={config.POLL_INTERVAL}s, "
              f"candles_per_poll={config.CANDLES_PER_POLL}")
 
@@ -188,6 +202,7 @@ def main():
                         last_seen[key] = latest
                         new_bars_today += 1
                         log.info(f"NEW BAR {key}: {latest} (+{added} candles merged)")
+                        record_new_bar(canonical, tf_name)
                         redis_publish("new_bar", {
                             "symbol": canonical,
                             "tf": tf_name,
@@ -211,7 +226,22 @@ def main():
             new_bars_today=new_bars_today,
         )
 
+        record_poll_duration(elapsed)
         log.debug(f"Cycle: {elapsed:.1f}s, errors={cycle_errors}, sleeping {sleep_time:.1f}s")
+
+        # Update cache depth gauge for OTel
+        try:
+            depths = {}
+            for f in config.CACHE_DIR.glob("*.json"):
+                try:
+                    data = json.loads(f.read_text())
+                    if isinstance(data, list):
+                        depths[f.stem] = len(data)
+                except Exception:
+                    pass
+            update_cache_depths(depths)
+        except Exception:
+            pass
 
         # Daily summary
         if now.day != last_summary_day:
