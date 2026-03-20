@@ -10,8 +10,8 @@ services:
     ports:
       - "8085:8080"    # Health endpoint
     environment:
-      # MT5 EA bridges on the host (priority order: freshest data first)
-      - BRIDGE_URLS=http://host.docker.internal:5005,http://host.docker.internal:5006,http://host.docker.internal:5007,http://host.docker.internal:5003
+      # MT5 EA bridges (5003=funded_200k is primary — serves ALL symbols/TFs)
+      - BRIDGE_URLS=http://host.docker.internal:5003,http://host.docker.internal:5005,http://host.docker.internal:5006,http://host.docker.internal:5007
       # TwelveData keys for history backfill (optional)
       - TWELVEDATA_KEYS=${TWELVEDATA_KEYS:-}
       # Redis for new-bar pub/sub (optional)
