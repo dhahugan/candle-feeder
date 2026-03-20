@@ -1,0 +1,71 @@
+services:
+  mt5-terminal:
+    image: gmag11/metatrader5_vnc
+    container_name: mt5-terminal
+    restart: always
+    volumes:
+      - mt5_config:/config
+    ports:
+      - "3000:3000"    # VNC browser UI — open once to login manually
+      - "8001:8001"    # RPyC API — used internally by candle-feeder
+    environment:
+      - CUSTOM_USER=${MT5_VNC_USER:-admin}
+      - PASSWORD=${MT5_VNC_PASSWORD:-changeme}
+    networks:
+      - trading-net
+
+  candle-feeder:
+    build: .
+    container_name: candle-feeder
+    restart: always
+    volumes:
+      - candle-cache:/data/cache/mt5_cache
+    environment:
+      - MT5_LOGIN=${MT5_LOGIN}
+      - MT5_PASSWORD=${MT5_PASSWORD}
+      - MT5_SERVER=${MT5_SERVER}
+      - MT5_HOST=mt5-terminal
+      - MT5_PORT=8001
+      - REDIS_URL=redis://redis:6379
+      - CACHE_DIR=/data/cache/mt5_cache
+      - MAX_CANDLES=${MAX_CANDLES:-50000}
+      - POLL_INTERVAL=${POLL_INTERVAL:-10}
+      - CANDLES_PER_POLL=${CANDLES_PER_POLL:-500}
+      - BOOTSTRAP_THRESHOLD=${BOOTSTRAP_THRESHOLD:-10000}
+    depends_on:
+      - mt5-terminal
+      - redis
+    ports:
+      - "8080:8080"    # Health endpoint
+    networks:
+      - trading-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s  # Bootstrap can take 2+ minutes
+
+  redis:
+    image: redis:7-alpine
+    container_name: candle-redis
+    restart: always
+    volumes:
+      - redis-data:/data
+    networks:
+      - trading-net
+
+  # To connect trading bots to the shared cache, add to each bot service:
+  #   volumes:
+  #     - candle-cache:/data/cache/mt5_cache:ro
+  #   networks:
+  #     - trading-net
+
+volumes:
+  mt5_config:       # Persists MT5 login session across restarts
+  candle-cache:     # Shared candle data — grows monotonically
+  redis-data:
+
+networks:
+  trading-net:
+    driver: bridge
