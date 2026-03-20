@@ -119,7 +119,8 @@ class BridgeClient:
                 log.debug(f"Bridge {url} failed for {symbol} {tf_param}: {e}")
                 continue
 
-        log.warning(f"All bridges failed for {symbol} {timeframe_name}")
+        log.warning(f"All bridges failed for {symbol} {timeframe_name} "
+                    f"(tried {len(urls_to_try)} bridges)")
         return []
 
     def get_symbols(self):

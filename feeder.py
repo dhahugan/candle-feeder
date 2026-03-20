@@ -174,7 +174,8 @@ def main():
         cycle_errors = 0
 
         # Fetch ALL symbols × timeframes in parallel using ThreadPoolExecutor
-        # so all pairs get updated at the same time with no sequential delay
+        # max_workers=5 to avoid overwhelming a single bridge with too many
+        # concurrent requests (bridges 5005/6/7 share the same MT5 terminal)
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         def _fetch_and_merge(canonical, tf_name):
@@ -197,7 +198,7 @@ def main():
 
         # Submit all 45 tasks (9 symbols × 5 TFs) to thread pool
         tasks = []
-        with ThreadPoolExecutor(max_workers=10) as pool:
+        with ThreadPoolExecutor(max_workers=5) as pool:
             for canonical in resolved:
                 for tf_name in config.TIMEFRAME_NAMES:
                     tasks.append(pool.submit(_fetch_and_merge, canonical, tf_name))
