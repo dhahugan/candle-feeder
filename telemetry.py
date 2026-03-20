@@ -125,7 +125,8 @@ def update_cache_depths(depths):
 
 
 def _observe_cache_depth(options):
+    from opentelemetry.metrics import Observation
     for key, count in _cache_depth_data.items():
         parts = key.rsplit("_", 1)
         if len(parts) == 2:
-            options.observe(count, {"symbol": parts[0], "timeframe": parts[1]})
+            yield Observation(count, {"symbol": parts[0], "timeframe": parts[1]})
