@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """
-candle-feeder — Real-time MT5 candlestick cache system.
+candle-feeder — Real-time candlestick cache system via MT5 EA bridges.
 
-Connects to an MT5 terminal via RPyC, pulls candle data directly,
-and writes to the shared disk cache that trading bots read from.
+Polls existing MT5 bridges for candle data, merges into shared cache files.
+Uses TwelveData as optional fallback for deep history backfill.
 
 Startup sequence:
-  1. Configure logging
-  2. Start health endpoint
-  3. Connect to MT5 (retry until success)
-  4. Resolve broker symbol names
-  5. Bootstrap deep history (50k candles)
-  6. Connect to Redis (optional)
-  7. Enter 10-second polling loop
+  1. Configure logging, start health endpoint
+  2. Connect to MT5 bridges (retry until success)
+  3. Resolve which symbols the bridges serve
+  4. Bootstrap history (bridges + TwelveData)
+  5. Connect to Redis (optional)
+  6. Enter 10-second polling loop
 """
 
 import json
@@ -25,7 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import config
-from mt5_client import MT5Client
+from bridge_client import BridgeClient
+from twelvedata_client import TwelveDataClient
 from symbol_resolver import resolve_symbols
 from merger import merge_and_write
 from health import start_health_server, update_state
@@ -45,22 +45,18 @@ _redis = None
 
 
 def redis_connect():
-    """Connect to Redis. Returns None if unavailable."""
     global _redis
     try:
-        import redis
-        _redis = redis.from_url(config.REDIS_URL, decode_responses=True)
+        import redis as redis_lib
+        _redis = redis_lib.from_url(config.REDIS_URL, decode_responses=True)
         _redis.ping()
         log.info(f"Redis connected: {config.REDIS_URL}")
-        return _redis
     except Exception as e:
         log.warning(f"Redis unavailable ({e}) — continuing without pub/sub")
         _redis = None
-        return None
 
 
 def redis_publish(channel, data):
-    """Publish to Redis channel. Silently fails if Redis unavailable."""
     global _redis
     if _redis is None:
         return
@@ -68,7 +64,7 @@ def redis_publish(channel, data):
         _redis.publish(channel, json.dumps(data))
     except Exception as e:
         log.warning(f"Redis publish failed: {e}")
-        _redis = None  # Will skip until reconnected
+        _redis = None
 
 
 # --- Graceful shutdown ---
@@ -77,7 +73,7 @@ _running = True
 
 def _shutdown(signum, frame):
     global _running
-    log.info(f"Received signal {signum}, shutting down gracefully...")
+    log.info(f"Received signal {signum}, shutting down...")
     _running = False
 
 
@@ -85,11 +81,10 @@ signal.signal(signal.SIGTERM, _shutdown)
 signal.signal(signal.SIGINT, _shutdown)
 
 
-# --- Daily log summary ---
 def log_cache_summary():
-    """Log a summary of all cache file depths."""
+    """Log daily summary of all cache file depths."""
     log.info("=" * 60)
-    log.info("DAILY CACHE DEPTH SUMMARY")
+    log.info("CACHE DEPTH SUMMARY")
     log.info("-" * 60)
     log.info(f"{'File':<30} {'Candles':>10}   {'Earliest':>12}")
     log.info("-" * 60)
@@ -107,12 +102,13 @@ def log_cache_summary():
     log.info("=" * 60)
 
 
-# --- Main ---
 def main():
     global _running
 
     log.info("=" * 60)
-    log.info("CANDLE-FEEDER starting")
+    log.info("CANDLE-FEEDER starting (bridge mode)")
+    log.info(f"Bridges: {config.BRIDGE_URLS}")
+    log.info(f"TwelveData keys: {len(config.TWELVEDATA_KEYS)}")
     log.info("=" * 60)
 
     # 1. Start health endpoint
@@ -121,32 +117,20 @@ def main():
     # 2. Ensure cache directory exists
     config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 3. Connect to MT5 (retry forever)
-    log.info(f"Connecting to MT5 at {config.MT5_HOST}:{config.MT5_PORT}...")
-    client = MT5Client(
-        host=config.MT5_HOST,
-        port=config.MT5_PORT,
-        login=config.MT5_LOGIN,
-        password=config.MT5_PASSWORD,
-        server=config.MT5_SERVER,
-    )
+    # 3. Connect to bridges
+    client = BridgeClient(config.BRIDGE_URLS)
     client.connect_with_retry(max_attempts=0, interval=10)
 
     update_state(
         mt5_connected=True,
-        mt5_account=str(config.MT5_LOGIN),
-        mt5_server=config.MT5_SERVER,
-        all_broker_symbols=client.get_symbols(),
+        mt5_account="bridge",
+        mt5_server=client._active_bridge or "none",
     )
 
-    # 4. Resolve timeframe constants
-    config.TIMEFRAMES = client.get_timeframe_constants()
-    log.info(f"Timeframes: {list(config.TIMEFRAMES.keys())}")
-
-    # 5. Resolve broker symbol names
+    # 4. Resolve symbols
     resolved, unresolved = resolve_symbols(client)
     if not resolved:
-        log.error("No symbols resolved — cannot proceed. Check MT5 login.")
+        log.error("No symbols resolved — check bridge connectivity")
         sys.exit(1)
 
     update_state(
@@ -154,16 +138,16 @@ def main():
         unresolved_symbols=unresolved,
     )
 
-    # 6. Bootstrap deep history
-    log.info("Starting history bootstrap...")
-    history_bootstrap.run(client, resolved)
+    # 5. Bootstrap history
+    td_client = TwelveDataClient()
+    history_bootstrap.run(client, td_client, resolved)
     update_state(bootstrap_complete=True)
     log_cache_summary()
 
-    # 7. Connect to Redis (optional)
+    # 6. Redis (optional)
     redis_connect()
 
-    # 8. Enter polling loop
+    # 7. Polling loop
     log.info(f"Entering polling loop: interval={config.POLL_INTERVAL}s, "
              f"candles_per_poll={config.CANDLES_PER_POLL}")
 
@@ -175,7 +159,7 @@ def main():
         cycle_start = time.time()
         cycle_errors = 0
 
-        for canonical, broker_symbol in resolved.items():
+        for canonical in resolved:
             if not _running:
                 break
 
@@ -183,13 +167,9 @@ def main():
                 if not _running:
                     break
 
-                tf_const = config.TIMEFRAMES.get(tf_name)
-                if tf_const is None:
-                    continue
-
                 try:
                     candles = client.fetch_candles(
-                        broker_symbol, tf_const,
+                        canonical, tf_name,
                         count=config.CANDLES_PER_POLL,
                     )
                     if not candles:
@@ -207,30 +187,19 @@ def main():
                     if last_seen.get(key) != latest:
                         last_seen[key] = latest
                         new_bars_today += 1
-                        log.info(
-                            f"NEW BAR {key}: {latest} "
-                            f"(+{added} candles merged)"
-                        )
+                        log.info(f"NEW BAR {key}: {latest} (+{added} candles merged)")
                         redis_publish("new_bar", {
                             "symbol": canonical,
-                            "broker_symbol": broker_symbol,
                             "tf": tf_name,
                             "time": latest,
-                            "source": "mt5",
+                            "source": "bridge",
                         })
 
                 except Exception as e:
                     cycle_errors += 1
                     log.error(f"Poll error {canonical} {tf_name}: {e}")
-                    if "connection" in str(e).lower() or "rpyc" in str(e).lower():
-                        try:
-                            client.reconnect()
-                        except Exception as re:
-                            log.error(f"Reconnect failed: {re}")
-                        break  # Restart symbol loop after reconnect
 
-                # Rate limit: brief pause between requests
-                time.sleep(0.2)
+                time.sleep(0.2)  # Brief pause between requests
 
         elapsed = time.time() - cycle_start
         sleep_time = max(0, config.POLL_INTERVAL - elapsed)
@@ -240,15 +209,11 @@ def main():
             last_poll_completed=now.isoformat(),
             last_poll_duration=elapsed,
             new_bars_today=new_bars_today,
-            mt5_connected=client._connected,
         )
 
-        log.debug(
-            f"Cycle: {elapsed:.1f}s, errors={cycle_errors}, "
-            f"sleeping {sleep_time:.1f}s"
-        )
+        log.debug(f"Cycle: {elapsed:.1f}s, errors={cycle_errors}, sleeping {sleep_time:.1f}s")
 
-        # Daily cache summary
+        # Daily summary
         if now.day != last_summary_day:
             last_summary_day = now.day
             new_bars_today = 0
