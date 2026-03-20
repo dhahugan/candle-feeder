@@ -173,31 +173,46 @@ def main():
         cycle_start = time.time()
         cycle_errors = 0
 
-        for canonical in resolved:
-            if not _running:
-                break
+        # Fetch ALL symbols × timeframes in parallel using ThreadPoolExecutor
+        # so all pairs get updated at the same time with no sequential delay
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-            for tf_name in config.TIMEFRAME_NAMES:
+        def _fetch_and_merge(canonical, tf_name):
+            """Fetch candles for one symbol/TF and merge into cache."""
+            candles = client.fetch_candles(
+                canonical, tf_name,
+                count=config.CANDLES_PER_POLL,
+            )
+            if not candles:
+                return canonical, tf_name, 0, None
+
+            key = f"{canonical}_{tf_name}"
+            cache_path = config.CACHE_DIR / f"{key}.json"
+            added = merge_and_write(
+                cache_path, candles,
+                max_candles=config.MAX_CANDLES,
+            )
+            latest = candles[-1]["time"]
+            return canonical, tf_name, added, latest
+
+        # Submit all 45 tasks (9 symbols × 5 TFs) to thread pool
+        tasks = []
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            for canonical in resolved:
+                for tf_name in config.TIMEFRAME_NAMES:
+                    tasks.append(pool.submit(_fetch_and_merge, canonical, tf_name))
+
+            for future in as_completed(tasks):
                 if not _running:
                     break
-
                 try:
-                    candles = client.fetch_candles(
-                        canonical, tf_name,
-                        count=config.CANDLES_PER_POLL,
-                    )
-                    if not candles:
+                    canonical, tf_name, added, latest = future.result(timeout=30)
+                    if latest is None:
                         continue
 
                     key = f"{canonical}_{tf_name}"
-                    cache_path = config.CACHE_DIR / f"{key}.json"
-                    added = merge_and_write(
-                        cache_path, candles,
-                        max_candles=config.MAX_CANDLES,
-                    )
 
                     # New bar detection
-                    latest = candles[-1]["time"]
                     if last_seen.get(key) != latest:
                         last_seen[key] = latest
                         new_bars_today += 1
@@ -212,9 +227,7 @@ def main():
 
                 except Exception as e:
                     cycle_errors += 1
-                    log.error(f"Poll error {canonical} {tf_name}: {e}")
-
-                time.sleep(0.2)  # Brief pause between requests
+                    log.error(f"Poll error: {e}")
 
         elapsed = time.time() - cycle_start
         sleep_time = max(0, config.POLL_INTERVAL - elapsed)
