@@ -43,6 +43,7 @@ HEALTH_PORT = int(os.environ.get("HEALTH_PORT", "8080"))
 SYMBOLS = [
     "EURUSD", "GBPUSD", "USDJPY", "XAUUSD",
     "EURJPY", "GBPJPY", "USDCAD", "NZDUSD", "US30",
+    "AUDUSD", "USDCHF",
 ]
 
 # Timeframes
@@ -53,6 +54,7 @@ TD_SYMBOL_MAP = {
     "EURUSD": "EUR/USD", "GBPUSD": "GBP/USD", "USDJPY": "USD/JPY",
     "XAUUSD": "XAU/USD", "EURJPY": "EUR/JPY", "GBPJPY": "GBP/JPY",
     "USDCAD": "USD/CAD", "NZDUSD": "NZD/USD", "US30": "DJI",
+    "AUDUSD": "AUD/USD", "USDCHF": "USD/CHF",
 }
 
 # TwelveData timeframe mapping

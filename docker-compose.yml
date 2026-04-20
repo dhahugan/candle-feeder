@@ -1,16 +1,24 @@
 services:
-  # Dedicated OANDA demo MT5 terminal — data extraction only, no trading
+  # Dedicated OANDA demo MT5 terminal — data extraction only, no trading.
+  # Migrated 2026-04-20 to mirror mt5_terminal (JustMarkets) architecture:
+  #   • HTTPS VNC port for reliable browser access (3021:3001)
+  #   • mt5linux RPC port exposed for Python-direct queries (8002:8001)
+  #   • bridge/ea bind-mounts for api_bridge_mt5linux.py
   mt5-oanda:
     image: gmag11/metatrader5_vnc
     container_name: mt5-oanda
     restart: always
     cpus: "1.0"
-    mem_limit: 768m
+    mem_limit: 1g   # bumped from 768m — Wine + Python + mt5linux + flask bridge
     volumes:
       - mt5_oanda_config:/config
+      - /home/claude_dev/hive-scalper/docker/mt5-justmarkets/bridge:/bridge
+      - /home/claude_dev/hive-scalper/docker/mt5-justmarkets/ea:/ea
     ports:
-      - "3001:3000"    # VNC browser UI
-      - "5008:4905"    # Candle bridge API
+      - "3001:3000"    # Web VNC over HTTP
+      - "3021:3001"    # Web VNC over HTTPS — required for browser websocket to work
+      - "5008:4905"    # Candle bridge REST (api_bridge_mt5linux.py)
+      - "8002:8001"    # mt5linux RPC (Python-direct access)
     environment:
       - CUSTOM_USER=${MT5_VNC_USER:-admin}
       - PASSWORD=${MT5_VNC_PASSWORD:-100%Secured}
@@ -30,7 +38,12 @@ services:
     ports:
       - "8085:8080"    # Health endpoint
     environment:
-      # OANDA dedicated candle bridge is PRIMARY, trading bridges as fallback
+      # mt5linux RPC hosts — PRIMARY path. feeder.py uses MT5LinuxClient when
+      # this is set. OANDA is listed first so it wins the connect() race.
+      # Client picks the first responding host and stays on it — if OANDA dies,
+      # next feeder restart tries JustMarkets automatically.
+      - MT5LINUX_HOSTS=mt5-oanda:8001,host.docker.internal:8001
+      # BRIDGE_URLS retained as a second-tier fallback (if MT5LINUX_HOSTS unset).
       - BRIDGE_URLS=http://mt5-oanda:4905,http://host.docker.internal:5003,http://host.docker.internal:5005,http://host.docker.internal:5006,http://host.docker.internal:5007
       # TwelveData keys for history backfill (optional)
       - TWELVEDATA_KEYS=${TWELVEDATA_KEYS:-}

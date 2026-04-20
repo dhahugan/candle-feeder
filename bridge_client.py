@@ -15,12 +15,17 @@ log = logging.getLogger("candle-feeder.bridge")
 
 # MT5 timeframe name → bridge API parameter
 TF_MAP = {
+    "M1": "M1",
     "M5": "M5",
     "M15": "M15",
     "H1": "H1",
     "H4": "H4",
     "D1": "D1",
 }
+
+# Timeframes that should only query the primary (first) bridge.
+# M1 generates heavy traffic and only the dedicated OANDA terminal serves it.
+PRIMARY_ONLY_TFS = {"M1"}
 
 
 class BridgeClient:
@@ -80,8 +85,13 @@ class BridgeClient:
         normalized candle dicts sorted ascending by time.
         """
         tf_param = TF_MAP.get(timeframe_name, timeframe_name)
-        urls_to_try = [self._active_bridge] if self._active_bridge else []
-        urls_to_try += [u for u in self.bridge_urls if u != self._active_bridge]
+
+        # M1 only available on the primary (OANDA) bridge; other TFs try all bridges
+        if timeframe_name in PRIMARY_ONLY_TFS:
+            urls_to_try = [self.bridge_urls[0]]
+        else:
+            urls_to_try = [self._active_bridge] if self._active_bridge else []
+            urls_to_try += [u for u in self.bridge_urls if u != self._active_bridge]
 
         for url in urls_to_try:
             try:

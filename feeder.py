@@ -24,7 +24,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import config
-from bridge_client import BridgeClient
+import os as _os_for_flag
+if _os_for_flag.environ.get('MT5LINUX_HOSTS'):
+    from mt5linux_client import MT5LinuxClient
+    BridgeClient = None
+else:
+    from bridge_client import BridgeClient
+    MT5LinuxClient = None
 from twelvedata_client import TwelveDataClient
 from symbol_resolver import resolve_symbols
 from merger import merge_and_write
@@ -126,7 +132,12 @@ def main():
     config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     # 3. Connect to bridges
-    client = BridgeClient(config.BRIDGE_URLS)
+    _mt5_hosts = _os_for_flag.environ.get('MT5LINUX_HOSTS', '').split(',') if _os_for_flag.environ.get('MT5LINUX_HOSTS') else []
+    if _mt5_hosts:
+        log.info(f'Using mt5linux client (hosts={_mt5_hosts})')
+        client = MT5LinuxClient([h.strip() for h in _mt5_hosts if h.strip()])
+    else:
+        client = BridgeClient(config.BRIDGE_URLS)
     client.connect_with_retry(max_attempts=0, interval=10)
 
     update_state(
