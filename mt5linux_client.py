@@ -17,10 +17,16 @@ import os
 import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from mt5linux import MetaTrader5
 
 log = logging.getLogger("candle-feeder.mt5linux")
+
+# Maldives Standard Time = UTC+5, no DST transitions.
+# All emitted candle times are in this zone so downstream dashboards
+# read wall-clock times that match the operator's locale.
+MALDIVES_TZ = ZoneInfo("Indian/Maldives")
 
 
 class MT5LinuxClient:
@@ -49,6 +55,9 @@ class MT5LinuxClient:
         self._active_bridge: Optional[str] = None
         # BridgeClient-compat: feeder.py may check `bridge_urls`
         self.bridge_urls = rpc_hosts
+        # Seconds the broker's trade-server clock is ahead of true UTC.
+        # Detected on connect (OANDA typically GMT+3 during EEST).
+        self._broker_offset_seconds: Optional[int] = None
 
     # ── BridgeClient-compatible surface ──────────────────────────────
     def connect_with_retry(self, max_attempts: int = 0, interval: int = 10) -> bool:
@@ -81,12 +90,45 @@ class MT5LinuxClient:
                     self._active_bridge = f"mt5linux://{host_port}"
                     log.info(f"Connected to mt5linux at {host_port} — "
                              f"account {info.login} on {info.server}")
+                    self._broker_offset_seconds = self._detect_broker_offset()
                     return True
                 log.warning(f"{host_port}: account_info returned None")
             except Exception as e:
                 log.warning(f"{host_port}: {e}")
         log.error(f"No mt5linux server reachable from {self.rpc_hosts}")
         return False
+
+    def _detect_broker_offset(self) -> int:
+        """
+        MT5's copy_rates_from_pos returns bar.time as epoch-seconds but encoded
+        in the trade-server's local clock (e.g. GMT+3 for OANDA during EEST).
+        We probe a liquid M1 bar, compare its epoch to our true UTC clock, and
+        round to the nearest hour — brokers only set offsets at :00.
+
+        Falls back to +3 h (OANDA default) if probing fails, so the feeder
+        can still start against an unresponsive symbol list.
+        """
+        for probe in ("EURUSD", "XAUUSD", "GBPUSD"):
+            try:
+                try:
+                    self._mt5.symbol_select(probe, True)
+                except Exception:
+                    pass
+                # M1, the most recently-closed bar
+                bars = self._mt5.copy_rates_from_pos(probe, 1, 1, 1)
+                if bars is not None and len(bars) > 0:
+                    broker_epoch = int(bars[0]["time"])
+                    utc_epoch = int(time.time())
+                    hours = round((broker_epoch - utc_epoch) / 3600)
+                    offset = hours * 3600
+                    log.info(f"Broker timezone detected: UTC{hours:+d}h "
+                             f"(probe={probe}, diff={broker_epoch - utc_epoch}s)")
+                    return offset
+            except Exception as e:
+                log.debug(f"offset probe via {probe}: {e}")
+                continue
+        log.warning("Could not detect broker timezone; defaulting to UTC+3")
+        return 3 * 3600
 
     def _ensure_connected(self) -> bool:
         if self._mt5 is None:
@@ -163,19 +205,23 @@ class MT5LinuxClient:
             log.debug(f"{symbol} resolved to broker symbol {resolved}")
 
         # Convert MT5's numpy structured array to plain dicts.
-        # Time format MUST match bridge_client._normalize output
-        # ("%Y-%m-%dT%H:%M:%S+00:00") — merger.py keys candles by the time
-        # string, so a format mismatch would dedupe the same moment as two
-        # distinct entries and silently corrupt the cache.
-        # NOTE: MT5 returns epoch seconds in the trade-server's timezone, not
-        # true UTC. We preserve the pre-existing convention (label as UTC)
-        # because 30+ days of historical cache already use it. Switching to
-        # real-UTC would misalign new bars against that history.
+        #
+        # Time handling: MT5 returns bar.time as epoch-seconds encoded in the
+        # trade-server's clock (not true UTC). We subtract the detected broker
+        # offset to recover true UTC, then render in Maldives time so the
+        # wall-clock string matches the operator's local expectation.
+        #
+        # The emitted ISO-8601 string (e.g. "2026-04-21T01:25:00+05:00") sorts
+        # correctly lexicographically and is still the exact dedupe key used
+        # by merger.py — all candle sources in this system must emit the same
+        # shape or merger.py silently duplicates rows.
+        offset = self._broker_offset_seconds if self._broker_offset_seconds is not None else 3 * 3600
         out: List[Dict] = []
         for b in bars:
+            true_utc_epoch = int(b["time"]) - offset
+            dt_mvt = datetime.fromtimestamp(true_utc_epoch, tz=MALDIVES_TZ)
             out.append({
-                "time":   datetime.fromtimestamp(int(b["time"]), tz=timezone.utc)
-                               .strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+                "time":   dt_mvt.isoformat(timespec="seconds"),
                 "open":   float(b["open"]),
                 "high":   float(b["high"]),
                 "low":    float(b["low"]),

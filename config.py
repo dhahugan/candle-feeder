@@ -39,6 +39,11 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379")
 # Health
 HEALTH_PORT = int(os.environ.get("HEALTH_PORT", "8080"))
 
+# Assumed broker trade-server offset from UTC, used only by the HTTP bridge
+# fallback path (bridge_client) where we can't probe the server directly.
+# OANDA during EEST = +3. mt5linux_client auto-detects and ignores this value.
+BROKER_UTC_OFFSET_HOURS = int(os.environ.get("BROKER_UTC_OFFSET_HOURS", "3"))
+
 # Canonical symbols to track
 SYMBOLS = [
     "EURUSD", "GBPUSD", "USDJPY", "XAUUSD",

@@ -7,11 +7,17 @@ No API keys, no rate limits — local HTTP calls to existing infrastructure.
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 
+import config
+
 log = logging.getLogger("candle-feeder.bridge")
+
+# All cache times are Maldives Standard Time (UTC+5, no DST).
+MALDIVES_TZ = ZoneInfo("Indian/Maldives")
 
 # MT5 timeframe name → bridge API parameter
 TF_MAP = {
@@ -145,11 +151,12 @@ class BridgeClient:
         return dict(TF_MAP)
 
     def _normalize(self, candle):
-        """Convert bridge candle to standard cache format."""
-        # Bridge returns datetime as "2026.03.20 02:15" or ISO format
+        """Convert bridge candle to standard cache format (Maldives time)."""
+        # Bridge returns datetime as "2026.03.20 02:15" (broker wall-clock,
+        # no tz label) or pre-ISO strings. We can't probe the broker timezone
+        # from here, so we trust config.BROKER_UTC_OFFSET_HOURS.
         raw_time = candle.get("datetime", candle.get("time", ""))
 
-        # Parse various formats
         parsed_time = None
         for fmt in ("%Y.%m.%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S",
                      "%Y-%m-%dT%H:%M:%S+00:00", "%Y.%m.%d %H:%M:%S"):
@@ -160,10 +167,13 @@ class BridgeClient:
                 continue
 
         if parsed_time is None:
-            # Fallback: use raw string
             time_str = str(raw_time)
         else:
-            time_str = parsed_time.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+            # parsed_time is broker wall-clock. Treat as (broker-offset hours
+            # ahead of UTC), convert to true UTC, then render in Maldives.
+            utc_dt = parsed_time.replace(tzinfo=timezone.utc) \
+                - timedelta(hours=config.BROKER_UTC_OFFSET_HOURS)
+            time_str = utc_dt.astimezone(MALDIVES_TZ).isoformat(timespec="seconds")
 
         return {
             "time": time_str,

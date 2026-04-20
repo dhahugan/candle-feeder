@@ -6,12 +6,16 @@ Uses the existing 4 API keys with round-robin rotation.
 import logging
 import time
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 
 from config import TWELVEDATA_KEYS, TD_SYMBOL_MAP, TD_TF_MAP
 
 log = logging.getLogger("candle-feeder.twelvedata")
+
+# All cache times are emitted in Maldives Standard Time (UTC+5, no DST).
+MALDIVES_TZ = ZoneInfo("Indian/Maldives")
 
 
 class TwelveDataClient:
@@ -80,11 +84,14 @@ class TwelveDataClient:
 
     def _normalize(self, val):
         """Convert TwelveData candle to standard cache format."""
-        # TwelveData returns "2024-01-15 10:00:00" in UTC
+        # TwelveData returns "2024-01-15 10:00:00" in UTC; we convert to
+        # Maldives Standard Time so every candle in the cache shares the
+        # same wall-clock frame regardless of source.
         raw_time = val.get("datetime", "")
         try:
-            dt = datetime.strptime(raw_time, "%Y-%m-%d %H:%M:%S")
-            time_str = dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+            dt_utc = datetime.strptime(raw_time, "%Y-%m-%d %H:%M:%S") \
+                             .replace(tzinfo=timezone.utc)
+            time_str = dt_utc.astimezone(MALDIVES_TZ).isoformat(timespec="seconds")
         except ValueError:
             time_str = raw_time
 
