@@ -59,6 +59,10 @@ class TwelveDataClient:
                     "interval": td_tf,
                     "outputsize": count,
                     "apikey": key,
+                    # Without this, TD defaults to the exchange timezone
+                    # (AEST/UTC+10 for forex). Explicit UTC matches our
+                    # parser and keeps cache entries at the right moment.
+                    "timezone": "UTC",
                 },
                 timeout=30,
             )
