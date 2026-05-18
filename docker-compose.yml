@@ -35,6 +35,10 @@ services:
       - "host.docker.internal:172.17.0.1"  # Docker host IP for bridge access
     volumes:
       - /home/claude_dev/hive-bot/data/cache/mt5_cache:/data/cache/mt5_cache
+      # Bind-mount config.py so the host file is the source of truth for SYMBOLS.
+      # Edit /home/claude_dev/candle-feeder/config.py + `docker restart candle-feeder`
+      # is all that's needed to update the tracked-symbols list — no image rebuild.
+      - ./config.py:/app/config.py:ro
     ports:
       - "8085:8080"    # Health endpoint
     environment:

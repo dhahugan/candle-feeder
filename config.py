@@ -46,20 +46,38 @@ BROKER_UTC_OFFSET_HOURS = int(os.environ.get("BROKER_UTC_OFFSET_HOURS", "3"))
 
 # Canonical symbols to track
 SYMBOLS = [
+    # Majors / liquid (original 11)
     "EURUSD", "GBPUSD", "USDJPY", "XAUUSD",
     "EURJPY", "GBPJPY", "USDCAD", "NZDUSD", "US30",
     "AUDUSD", "USDCHF",
+    # AUD crosses
+    "AUDCAD", "AUDCHF", "AUDJPY", "AUDNZD",
+    # EUR crosses
+    "EURAUD", "EURCAD", "EURCHF", "EURGBP", "EURNZD",
+    # GBP crosses
+    "GBPAUD", "GBPCAD", "GBPCHF", "GBPNZD",
+    # NZD / CAD / CHF crosses
+    "NZDCAD", "NZDCHF", "NZDJPY", "CADCHF", "CADJPY", "CHFJPY",
+    # Indices & crypto
+    "NAS100", "BTCUSD", "ETHUSD",
 ]
 
 # Timeframes
 TIMEFRAME_NAMES = ["M1", "M5", "M15", "H1", "H4", "D1"]
 
-# TwelveData symbol mapping
+# TwelveData symbol mapping (used only for deep-history backfill fallback)
 TD_SYMBOL_MAP = {
     "EURUSD": "EUR/USD", "GBPUSD": "GBP/USD", "USDJPY": "USD/JPY",
     "XAUUSD": "XAU/USD", "EURJPY": "EUR/JPY", "GBPJPY": "GBP/JPY",
     "USDCAD": "USD/CAD", "NZDUSD": "NZD/USD", "US30": "DJI",
     "AUDUSD": "AUD/USD", "USDCHF": "USD/CHF",
+    "AUDCAD": "AUD/CAD", "AUDCHF": "AUD/CHF", "AUDJPY": "AUD/JPY", "AUDNZD": "AUD/NZD",
+    "EURAUD": "EUR/AUD", "EURCAD": "EUR/CAD", "EURCHF": "EUR/CHF",
+    "EURGBP": "EUR/GBP", "EURNZD": "EUR/NZD",
+    "GBPAUD": "GBP/AUD", "GBPCAD": "GBP/CAD", "GBPCHF": "GBP/CHF", "GBPNZD": "GBP/NZD",
+    "NZDCAD": "NZD/CAD", "NZDCHF": "NZD/CHF", "NZDJPY": "NZD/JPY",
+    "CADCHF": "CAD/CHF", "CADJPY": "CAD/JPY", "CHFJPY": "CHF/JPY",
+    "NAS100": "NDX", "BTCUSD": "BTC/USD", "ETHUSD": "ETH/USD",
 }
 
 # TwelveData timeframe mapping
